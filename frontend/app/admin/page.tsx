@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { Batch, CreateBatchInput, CheckpointStatus } from "@/lib/types";
-import { getBatches, createBatch, addCheckpoint } from "@/lib/api";
+import type { Batch, CreateBatchInput, CheckpointStatus, HiveSummary, TelemetryDetail } from "@/lib/types";
+import { getBatches, createBatch, addCheckpoint, getHives, getLatestTelemetry } from "@/lib/api";
 import BatchCard from "@/components/BatchCard";
 import { LoadingSpinner, ErrorState } from "@/components/States";
-import { Plus, X, QrCode } from "lucide-react";
+import { Plus, X, QrCode, Thermometer, Droplets, Weight, Wifi } from "lucide-react";
 import Image from "next/image";
 
 type ModalState =
@@ -22,6 +22,11 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalState>({ type: "none" });
   const [submitting, setSubmitting] = useState(false);
+
+  // ── IoT Telemetry state ──
+  const [hives, setHives] = useState<HiveSummary[]>([]);
+  const [telemetry, setTelemetry] = useState<Record<string, TelemetryDetail | null>>({});
+  const [telemetryLastUpdated, setTelemetryLastUpdated] = useState<Date | null>(null);
 
   // ── New batch form state ──
   const [form, setForm] = useState<CreateBatchInput>({
@@ -50,6 +55,26 @@ export default function AdminPage() {
   useEffect(() => {
     loadBatches();
   }, [loadBatches]);
+
+  // ── Poll telemetry every 5 seconds ──
+  useEffect(() => {
+    async function fetchTelemetry() {
+      try {
+        const hiveList = await getHives();
+        setHives(hiveList);
+        const readings = await Promise.all(
+          hiveList.map(async (h) => [h.hive_id, await getLatestTelemetry(h.hive_id)] as const)
+        );
+        setTelemetry(Object.fromEntries(readings));
+        setTelemetryLastUpdated(new Date());
+      } catch {
+        // Silently ignore — telemetry panel degrades gracefully
+      }
+    }
+    fetchTelemetry();
+    const interval = setInterval(fetchTelemetry, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   async function handleCreateBatch(e: React.FormEvent) {
     e.preventDefault();
@@ -128,6 +153,116 @@ export default function AdminPage() {
           ))}
         </div>
       )}
+
+      {/* ── IoT HIVE TELEMETRY PANEL ─────────────────────────────────────── */}
+      <div className="mt-12">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <Wifi className="h-5 w-5 text-emerald-400" />
+              Live Hive Telemetry
+            </h2>
+            <p className="mt-1 text-xs text-stone-500">
+              {telemetryLastUpdated
+                ? `Last updated: ${telemetryLastUpdated.toLocaleTimeString()} · auto-refreshes every 5s`
+                : "Connecting to IoT devices…"}
+            </p>
+          </div>
+        </div>
+
+        {hives.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-stone-700 bg-stone-900/40 px-6 py-10 text-center">
+            <span className="text-4xl">🐝</span>
+            <p className="mt-3 text-sm text-stone-500">No smart hives connected yet.</p>
+            <p className="mt-1 text-xs text-stone-600">Once an ESP32 device sends its first reading, it will appear here.</p>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {hives.map((hive) => {
+              const reading = telemetry[hive.hive_id];
+              const statusColor =
+                reading?.status === "HEALTHY"
+                  ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+                  : reading?.status === "WARNING"
+                  ? "text-amber-400 bg-amber-500/10 border-amber-500/30"
+                  : reading?.status === "CRITICAL"
+                  ? "text-red-400 bg-red-500/10 border-red-500/30"
+                  : "text-stone-500 bg-stone-800 border-stone-700";
+              const statusDot =
+                reading?.status === "HEALTHY"
+                  ? "bg-emerald-400"
+                  : reading?.status === "WARNING"
+                  ? "bg-amber-400"
+                  : reading?.status === "CRITICAL"
+                  ? "bg-red-400"
+                  : "bg-stone-600";
+
+              return (
+                <div
+                  key={hive.hive_id}
+                  className="rounded-2xl border border-stone-700 bg-stone-900 p-5 flex flex-col gap-4"
+                >
+                  {/* Hive header */}
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-mono text-sm font-bold text-white">{hive.hive_id}</p>
+                      <p className="text-xs text-stone-500 mt-0.5">{hive.device_id}</p>
+                      {hive.name && <p className="text-xs text-stone-400 mt-0.5">{hive.name}</p>}
+                    </div>
+                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${statusColor}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
+                      {reading?.status ?? "No data"}
+                    </span>
+                  </div>
+
+                  {/* Sensor readings */}
+                  {reading ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl bg-stone-800 p-3">
+                          <div className="flex items-center gap-1.5 text-xs text-stone-400 mb-1">
+                            <Thermometer className="h-3 w-3" /> Hive Temp
+                          </div>
+                          <p className="text-lg font-bold text-white">{reading.internal_temperature.toFixed(1)}<span className="text-xs text-stone-400 ml-0.5">°C</span></p>
+                          <p className="text-xs text-stone-600">Δ {reading.temperature_delta.toFixed(1)}°C vs outside</p>
+                        </div>
+                        <div className="rounded-xl bg-stone-800 p-3">
+                          <div className="flex items-center gap-1.5 text-xs text-stone-400 mb-1">
+                            <Droplets className="h-3 w-3" /> Humidity
+                          </div>
+                          <p className="text-lg font-bold text-white">{reading.humidity.toFixed(1)}<span className="text-xs text-stone-400 ml-0.5">%</span></p>
+                        </div>
+                        <div className="rounded-xl bg-stone-800 p-3">
+                          <div className="flex items-center gap-1.5 text-xs text-stone-400 mb-1">
+                            <Weight className="h-3 w-3" /> Hive Weight
+                          </div>
+                          <p className="text-lg font-bold text-white">{reading.hive_weight.toFixed(1)}<span className="text-xs text-stone-400 ml-0.5">kg</span></p>
+                        </div>
+                        <div className="rounded-xl bg-stone-800 p-3">
+                          <div className="flex items-center gap-1.5 text-xs text-stone-400 mb-1">
+                            <Thermometer className="h-3 w-3" /> Outside
+                          </div>
+                          <p className="text-lg font-bold text-white">{reading.external_temperature.toFixed(1)}<span className="text-xs text-stone-400 ml-0.5">°C</span></p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-stone-500">
+                          Health score: <span className="font-semibold text-stone-300">{reading.health_score}/100</span>
+                        </div>
+                        <p className="text-xs text-stone-600">
+                          {new Date(reading.server_timestamp).toLocaleTimeString()}
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-stone-600 text-center py-4">Waiting for first reading…</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* ── MODAL BACKDROP ──────────────────────────────────────────────────── */}
       {modal.type !== "none" && (

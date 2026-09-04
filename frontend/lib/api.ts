@@ -5,7 +5,7 @@
  * When USE_MOCK is false, only this file needs changes — zero component rework.
  */
 
-import type { Batch, VerifyResponse, CreateBatchInput, AddCheckpointInput } from "./types";
+import type { Batch, VerifyResponse, CreateBatchInput, AddCheckpointInput, TelemetryDetail, HiveSummary } from "./types";
 
 // ─── TOGGLE THIS TO CONNECT TO REAL BACKEND ──────────────────────────────────
 const USE_MOCK = false;
@@ -26,6 +26,7 @@ const MOCK_BATCHES: Batch[] = [
     quantity_kg: 120,
     created_at: "2024-08-15T06:30:00Z",
     qr_code_url: "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=HCB-2024-001",
+    hive_id: null,
     checkpoints: [
       {
         status: "harvested",
@@ -61,6 +62,7 @@ const MOCK_BATCHES: Batch[] = [
     quantity_kg: 85,
     created_at: "2024-09-01T07:00:00Z",
     qr_code_url: "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=HCB-2024-002",
+    hive_id: null,
     checkpoints: [
       {
         status: "harvested",
@@ -84,6 +86,7 @@ const MOCK_BATCHES: Batch[] = [
     quantity_kg: 200,
     created_at: "2024-09-10T05:00:00Z",
     qr_code_url: "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=HCB-2024-003",
+    hive_id: null,
     checkpoints: [
       {
         status: "harvested",
@@ -114,6 +117,7 @@ async function mockCreateBatch(input: CreateBatchInput): Promise<Batch> {
     ...input,
     created_at: new Date().toISOString(),
     qr_code_url: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=HCB-2024-${String(MOCK_BATCHES.length + 1).padStart(3, "0")}`,
+    hive_id: null,
     checkpoints: [],
   };
   MOCK_BATCHES.push(newBatch);
@@ -196,3 +200,30 @@ export const addCheckpoint = (input: AddCheckpointInput): Promise<Batch> =>
 
 export const verifyBatch = (batchId: string): Promise<VerifyResponse> =>
   USE_MOCK ? mockVerifyBatch(batchId) : realVerifyBatch(batchId);
+
+// ─── TELEMETRY API ────────────────────────────────────────────────────────────
+
+async function realGetHives(): Promise<HiveSummary[]> {
+  return realRequest<HiveSummary[]>("/api/hives/");
+}
+
+async function realGetLatestTelemetry(hiveId: string): Promise<TelemetryDetail | null> {
+  try {
+    return await realRequest<TelemetryDetail>(`/api/hives/${hiveId}/telemetry/latest`);
+  } catch {
+    return null; // 404 means no readings yet — treat as null
+  }
+}
+
+async function realGetTelemetryHistory(hiveId: string, limit = 20): Promise<TelemetryDetail[]> {
+  return realRequest<TelemetryDetail[]>(`/api/hives/${hiveId}/telemetry?limit=${limit}`);
+}
+
+export const getHives = (): Promise<HiveSummary[]> =>
+  USE_MOCK ? Promise.resolve([]) : realGetHives();
+
+export const getLatestTelemetry = (hiveId: string): Promise<TelemetryDetail | null> =>
+  USE_MOCK ? Promise.resolve(null) : realGetLatestTelemetry(hiveId);
+
+export const getTelemetryHistory = (hiveId: string, limit = 20): Promise<TelemetryDetail[]> =>
+  USE_MOCK ? Promise.resolve([]) : realGetTelemetryHistory(hiveId, limit);

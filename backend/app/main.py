@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import batches, verify
+from app.routers import batches, verify, telemetry
 
 app = FastAPI(
     title="Honey Chain API",
@@ -18,6 +18,7 @@ app.add_middleware(
 
 app.include_router(batches.router)
 app.include_router(verify.router)
+app.include_router(telemetry.router)
 
 
 @app.get("/", tags=["Health"])

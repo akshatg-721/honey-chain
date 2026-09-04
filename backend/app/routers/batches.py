@@ -77,6 +77,7 @@ def create_batch(payload: CreateBatchInput, db: Session = Depends(get_db)):
         quantity_kg=payload.quantity_kg,
         created_at=now,
         qr_code_url=qr_code_url,
+        hive_id=payload.hive_id,
     )
     db.add(batch)
     db.flush()  # flush so FK is satisfied before checkpoint insert
