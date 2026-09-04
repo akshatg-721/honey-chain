@@ -27,9 +27,12 @@ export default function BatchCard({ batch, onAddCheckpoint }: BatchCardProps) {
         {/* Header row */}
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="font-mono text-xs text-amber-400 font-semibold tracking-wider">
                 {batch.batch_id}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded bg-stone-800 px-1.5 py-0.5 text-[10px] font-mono text-stone-300 border border-stone-700">
+                Hive: {batch.hive_id ?? "Not linked"}
               </span>
               {latest && (
                 <span

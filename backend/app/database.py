@@ -1,2 +1,29 @@
-# TODO: Neon/Postgres database connection setup using SQLAlchemy
-# Create engine, SessionLocal, and Base declarative class here.
+import os
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+load_dotenv()
+
+# Default to SQLite for local development/testing if DATABASE_URL is not set
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./honeychain.db")
+
+# Neon/PostgreSQL compatibility: SQLAlchemy requires postgresql:// instead of postgres://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+
+def get_db():
+    """FastAPI dependency for obtaining a database session."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

@@ -7,7 +7,7 @@ import { verifyBatch } from "@/lib/api";
 import CheckpointTimeline from "@/components/CheckpointTimeline";
 import Badge from "@/components/Badge";
 import { LoadingSpinner, ErrorState } from "@/components/States";
-import { MapPin, Scale, Calendar, User, Hash, ArrowLeft } from "lucide-react";
+import { MapPin, Scale, Calendar, User, Hash, ArrowLeft, Radio } from "lucide-react";
 import Link from "next/link";
 
 function formatDate(iso: string) {
@@ -82,8 +82,16 @@ export default function VerifyPage() {
               variant={result.chain_valid ? "verified" : "unverified"}
               large
             />
+            <p className="mt-3 text-xs text-stone-400 font-mono tracking-wide">
+              {result.chain_valid ? "Blockchain-Verified Provenance Record" : "Integrity Verification Failed"}
+            </p>
+            <p className="mt-1 text-xs text-stone-500">
+              {result.chain_valid
+                ? "The recorded harvest, processing, and shipping history is cryptographically tamper-evident."
+                : "One or more ledger blocks do not match their cryptographic hashes."}
+            </p>
             {!result.chain_valid && (
-              <p className="mt-4 text-sm text-stone-400">
+              <p className="mt-4 text-sm text-red-400">
                 One or more records in this batch&apos;s ledger have been tampered with. Do not
                 purchase this product.
               </p>
@@ -137,6 +145,24 @@ export default function VerifyPage() {
                 </div>
               ))}
             </div>
+
+            {/* Source Hive Link */}
+            {result.batch.hive_id && (
+              <div className="mt-5 flex items-center justify-between rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <Radio className="h-4 w-4 text-amber-400 shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold text-white">Live Hive Monitoring: {result.batch.hive_id}</p>
+                    <p className="text-[11px] text-stone-400">
+                      Real-time environmental data from the source hive continuously recorded on-site.
+                    </p>
+                  </div>
+                </div>
+                <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/30">
+                  IoT Monitored
+                </span>
+              </div>
+            )}
           </div>
 
           {/* ── Supply Chain Timeline ─────────────────────────────────────────── */}
@@ -153,13 +179,17 @@ export default function VerifyPage() {
           </div>
 
           {/* ── What this means ───────────────────────────────────────────────── */}
-          <div className="rounded-xl border border-stone-800 bg-stone-900/50 px-5 py-4">
-            <p className="text-xs text-stone-500 leading-relaxed">
-              <span className="font-semibold text-stone-400">How this works: </span>
-              Each checkpoint records a SHA-256 hash of its data and the previous block&apos;s
-              hash, forming a cryptographic chain. Any modification to past records
-              invalidates all subsequent hashes — making tampering immediately detectable.
+          <div className="rounded-xl border border-stone-800 bg-stone-900/50 px-5 py-4 space-y-2">
+            <p className="text-xs text-stone-400 leading-relaxed">
+              <span className="font-semibold text-amber-400">Blockchain-Verified Provenance Record: </span>
+              The recorded harvest, processing, and shipping history is cryptographically tamper-evident. Each supply-chain checkpoint seals a deterministic SHA-256 hash of its data and predecessor hash into an immutable ledger.
             </p>
+            {result.batch.hive_id && (
+              <p className="text-xs text-stone-400 leading-relaxed border-t border-stone-800/80 pt-2">
+                <span className="font-semibold text-stone-300">Live Hive Monitoring: </span>
+                Real-time environmental data from the source hive continuously recorded on-site.
+              </p>
+            )}
           </div>
         </div>
       ) : null}

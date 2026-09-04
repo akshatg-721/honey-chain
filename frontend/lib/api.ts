@@ -5,11 +5,12 @@
  * When USE_MOCK is false, only this file needs changes — zero component rework.
  */
 
-import type { Batch, VerifyResponse, CreateBatchInput, AddCheckpointInput } from "./types";
+import type { Batch, VerifyResponse, CreateBatchInput, AddCheckpointInput, Telemetry, HiveSummary } from "./types";
 
 // ─── TOGGLE THIS TO CONNECT TO REAL BACKEND ──────────────────────────────────
-const USE_MOCK = true;
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API_BASE = API_BASE_URL;
+const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === "true";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Simulated network delay (ms) — makes loading states visible during dev/demo */
@@ -151,8 +152,23 @@ async function realRequest<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || `HTTP ${res.status}`);
+    let message = `HTTP ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson && typeof errJson.detail === "string") {
+        message = errJson.detail;
+      }
+    } catch {
+      try {
+        const text = await res.text();
+        if (text) message = text;
+      } catch {
+        // ignore
+      }
+    }
+    const error = new Error(message);
+    (error as any).status = res.status;
+    throw error;
   }
   return res.json() as Promise<T>;
 }
@@ -196,3 +212,27 @@ export const addCheckpoint = (input: AddCheckpointInput): Promise<Batch> =>
 
 export const verifyBatch = (batchId: string): Promise<VerifyResponse> =>
   USE_MOCK ? mockVerifyBatch(batchId) : realVerifyBatch(batchId);
+
+// ─── IOT TELEMETRY API (LIVE BACKEND) ─────────────────────────────────────────
+
+export async function getLatestTelemetry(hiveId: string): Promise<Telemetry> {
+  const res = await fetch(`${API_BASE}/api/hives/${hiveId}/telemetry/latest`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch latest telemetry (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getTelemetryHistory(hiveId: string, limit = 20): Promise<Telemetry[]> {
+  const res = await fetch(`${API_BASE}/api/hives/${hiveId}/telemetry?limit=${limit}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch telemetry history (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function getHives(): Promise<HiveSummary[]> {
+  const res = await fetch(`${API_BASE}/api/hives/`);
+  if (!res.ok) throw new Error(`Failed to fetch hives (${res.status})`);
+  return res.json();
+}

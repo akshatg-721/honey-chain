@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { Batch, CreateBatchInput, CheckpointStatus } from "@/lib/types";
-import { getBatches, createBatch, addCheckpoint } from "@/lib/api";
+import type { Batch, CreateBatchInput, CheckpointStatus, Telemetry, HiveSummary } from "@/lib/types";
+import { getBatches, createBatch, addCheckpoint, getLatestTelemetry, getTelemetryHistory, getHives, API_BASE_URL } from "@/lib/api";
 import BatchCard from "@/components/BatchCard";
 import { LoadingSpinner, ErrorState } from "@/components/States";
-import { Plus, X, QrCode } from "lucide-react";
+import { Plus, X, QrCode, Radio, RefreshCw, Thermometer, Droplets, Scale, Activity, ChevronDown, ChevronUp } from "lucide-react";
 import Image from "next/image";
 
 type ModalState =
@@ -23,12 +23,25 @@ export default function AdminPage() {
   const [modal, setModal] = useState<ModalState>({ type: "none" });
   const [submitting, setSubmitting] = useState(false);
 
+  // ── IoT Telemetry State ──
+  const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
+  const [telemetryHistory, setTelemetryHistory] = useState<Telemetry[]>([]);
+  const [telemetryLoading, setTelemetryLoading] = useState(true);
+  const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // ── Hive list state ──
+  const [hives, setHives] = useState<HiveSummary[]>([]);
+
   // ── New batch form state ──
   const [form, setForm] = useState<CreateBatchInput>({
     beekeeper_name: "",
     farm_location: "",
     harvest_date: "",
     quantity_kg: 0,
+    hive_id: undefined,
   });
 
   // ── Add checkpoint form state ──
@@ -47,9 +60,46 @@ export default function AdminPage() {
     }
   }, []);
 
+  const loadTelemetry = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      const [latest, history] = await Promise.all([
+        getLatestTelemetry("HIVE-01"),
+        getTelemetryHistory("HIVE-01", 10),
+      ]);
+      setTelemetry(latest);
+      setTelemetryHistory(history);
+      setTelemetryError(null);
+    } catch (e) {
+      setTelemetryError(e instanceof Error ? e.message : "Failed to load telemetry.");
+    } finally {
+      setTelemetryLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  const loadHives = useCallback(async () => {
+    try {
+      const data = await getHives();
+      setHives(data);
+    } catch {
+      // Non-blocking
+    }
+  }, []);
+
   useEffect(() => {
     loadBatches();
-  }, [loadBatches]);
+    loadHives();
+  }, [loadBatches, loadHives]);
+
+  useEffect(() => {
+    loadTelemetry();
+    if (!autoRefresh) return;
+    const interval = setInterval(() => {
+      loadTelemetry();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [loadTelemetry, autoRefresh]);
 
   async function handleCreateBatch(e: React.FormEvent) {
     e.preventDefault();
@@ -58,7 +108,7 @@ export default function AdminPage() {
       const newBatch = await createBatch(form);
       setBatches((prev) => [...prev, newBatch]);
       setModal({ type: "show-qr", batch: newBatch });
-      setForm({ beekeeper_name: "", farm_location: "", harvest_date: "", quantity_kg: 0 });
+      setForm({ beekeeper_name: "", farm_location: "", harvest_date: "", quantity_kg: 0, hive_id: undefined });
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to create batch.");
     } finally {
@@ -102,6 +152,217 @@ export default function AdminPage() {
           <Plus className="h-4 w-4" />
           New Batch
         </button>
+      </div>
+
+      {/* ── REAL-TIME IOT TELEMETRY SECTION ───────────────────────────────────── */}
+      <section className="mb-10 rounded-2xl border border-stone-800 bg-stone-900/90 p-6 shadow-xl backdrop-blur-sm">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-stone-800 pb-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <Radio className="h-5 w-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white">Smart Hive Telemetry</h2>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-400 border border-emerald-500/30">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  Live (HIVE-01)
+                </span>
+              </div>
+              <p className="text-xs text-stone-400 mt-0.5 font-mono">
+                Source: {telemetry?.device_id ?? "ESP32-HIVE-01"} • Frequency: 5s
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs text-stone-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="rounded border-stone-700 bg-stone-800 text-amber-500 focus:ring-amber-500/20"
+              />
+              Auto-sync (5s)
+            </label>
+            <button
+              onClick={loadTelemetry}
+              disabled={isRefreshing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-stone-700 bg-stone-800 px-3 py-1.5 text-xs font-medium text-stone-200 hover:bg-stone-700 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {telemetryLoading && !telemetry ? (
+          <div className="py-8 text-center text-stone-400 text-sm">
+            <LoadingSpinner message="Connecting to IoT telemetry feed…" />
+          </div>
+        ) : telemetryError && !telemetry ? (
+          <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-center">
+            <p className="text-sm text-red-400">{telemetryError}</p>
+            <p className="text-xs text-stone-500 mt-1">Make sure the FastAPI backend and ESP32 device are running.</p>
+          </div>
+        ) : telemetry ? (
+          <div className="space-y-6">
+            {/* Status & Health Header */}
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-stone-800 bg-stone-950/60 p-4">
+              <div className="flex items-center gap-4">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-stone-500 font-mono">Colony Health Score</p>
+                  <p className="text-2xl font-bold text-white font-mono">{telemetry.health_score}%</p>
+                </div>
+                <div className="h-8 w-px bg-stone-800" />
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-stone-500 font-mono">Status</p>
+                  <span
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
+                      telemetry.status === "HEALTHY"
+                        ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                        : telemetry.status === "WARNING"
+                        ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                        : "bg-red-500/15 text-red-400 border border-red-500/30"
+                    }`}
+                  >
+                    {telemetry.status}
+                  </span>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-stone-500 font-mono">Last Reading #{telemetry.reading_id}</p>
+                <p className="text-xs text-stone-400 font-mono">
+                  {new Date(telemetry.server_timestamp).toLocaleTimeString("en-IN", {
+                    hour12: true,
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
+                </p>
+              </div>
+            </div>
+
+            {/* Metrics Cards */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {/* Internal Temp */}
+              <div className="rounded-xl border border-stone-800 bg-stone-950/50 p-4">
+                <div className="flex items-center justify-between text-stone-400 mb-1">
+                  <span className="text-xs">Internal Temp</span>
+                  <Thermometer className="h-4 w-4 text-amber-400" />
+                </div>
+                <p className="text-xl font-bold text-white font-mono">
+                  {telemetry.internal_temperature.toFixed(1)} <span className="text-xs font-normal text-stone-400">°C</span>
+                </p>
+                <p className="text-[10px] text-stone-500 mt-1">Optimum: 34.5 - 35.5°C</p>
+              </div>
+
+              {/* Humidity */}
+              <div className="rounded-xl border border-stone-800 bg-stone-950/50 p-4">
+                <div className="flex items-center justify-between text-stone-400 mb-1">
+                  <span className="text-xs">Hive Humidity</span>
+                  <Droplets className="h-4 w-4 text-sky-400" />
+                </div>
+                <p className="text-xl font-bold text-white font-mono">
+                  {telemetry.humidity.toFixed(1)} <span className="text-xs font-normal text-stone-400">%</span>
+                </p>
+                <p className="text-[10px] text-stone-500 mt-1">Optimum: 50 - 60%</p>
+              </div>
+
+              {/* Hive Weight */}
+              <div className="rounded-xl border border-stone-800 bg-stone-950/50 p-4">
+                <div className="flex items-center justify-between text-stone-400 mb-1">
+                  <span className="text-xs">Hive Weight</span>
+                  <Scale className="h-4 w-4 text-emerald-400" />
+                </div>
+                <p className="text-xl font-bold text-white font-mono">
+                  {telemetry.hive_weight.toFixed(1)} <span className="text-xs font-normal text-stone-400">kg</span>
+                </p>
+                <p className="text-[10px] text-stone-500 mt-1">Honey storage index</p>
+              </div>
+
+              {/* Ambient & Delta */}
+              <div className="rounded-xl border border-stone-800 bg-stone-950/50 p-4">
+                <div className="flex items-center justify-between text-stone-400 mb-1">
+                  <span className="text-xs">Ambient / Δ</span>
+                  <Activity className="h-4 w-4 text-purple-400" />
+                </div>
+                <p className="text-xl font-bold text-white font-mono">
+                  {telemetry.external_temperature.toFixed(1)} <span className="text-xs font-normal text-stone-400">°C</span>
+                </p>
+                <p className="text-[10px] text-stone-500 mt-1">
+                  Delta: <span className="text-stone-300 font-mono">+{telemetry.temperature_delta.toFixed(1)}°C</span>
+                </p>
+              </div>
+            </div>
+
+            {/* Expandable History Table */}
+            <div className="border-t border-stone-800 pt-4">
+              <button
+                onClick={() => setShowHistory((prev) => !prev)}
+                className="flex items-center gap-2 text-xs font-semibold text-stone-400 hover:text-amber-400 transition-colors"
+              >
+                <span>{showHistory ? "Hide Sensor History Log" : "Show Recent Sensor History Log (Last 10)"}</span>
+                {showHistory ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+
+              {showHistory && (
+                <div className="mt-4 overflow-x-auto rounded-xl border border-stone-800 bg-stone-950/80">
+                  <table className="w-full text-left text-xs text-stone-300">
+                    <thead className="bg-stone-900 text-[10px] uppercase text-stone-400">
+                      <tr>
+                        <th className="px-3 py-2">ID</th>
+                        <th className="px-3 py-2">Timestamp</th>
+                        <th className="px-3 py-2">Internal</th>
+                        <th className="px-3 py-2">External</th>
+                        <th className="px-3 py-2">Δ Temp</th>
+                        <th className="px-3 py-2">Humidity</th>
+                        <th className="px-3 py-2">Weight</th>
+                        <th className="px-3 py-2">Health</th>
+                        <th className="px-3 py-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-800/60 font-mono">
+                      {telemetryHistory.map((row) => (
+                        <tr key={row.reading_id} className="hover:bg-stone-900/50 transition-colors">
+                          <td className="px-3 py-2 text-stone-500">#{row.reading_id}</td>
+                          <td className="px-3 py-2 text-stone-400">
+                            {new Date(row.server_timestamp).toLocaleTimeString()}
+                          </td>
+                          <td className="px-3 py-2 text-amber-300">{row.internal_temperature.toFixed(1)}°C</td>
+                          <td className="px-3 py-2 text-stone-400">{row.external_temperature.toFixed(1)}°C</td>
+                          <td className="px-3 py-2 text-purple-300">+{row.temperature_delta.toFixed(1)}°C</td>
+                          <td className="px-3 py-2 text-sky-300">{row.humidity.toFixed(1)}%</td>
+                          <td className="px-3 py-2 text-emerald-300">{row.hive_weight.toFixed(1)}kg</td>
+                          <td className="px-3 py-2 font-bold text-white">{row.health_score}%</td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                row.status === "HEALTHY"
+                                  ? "bg-emerald-500/20 text-emerald-400"
+                                  : row.status === "WARNING"
+                                  ? "bg-amber-500/20 text-amber-400"
+                                  : "bg-red-500/20 text-red-400"
+                              }`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      {/* ── BATCH MANAGEMENT SECTION ────────────────────────────────────────── */}
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-bold text-white">Supply-Chain Batches</h2>
+        <span className="text-xs text-stone-500 font-mono">{batches.length} Registered</span>
       </div>
 
       {/* Batch grid */}
@@ -203,6 +464,31 @@ export default function AdminPage() {
                       className="w-full rounded-lg border border-stone-700 bg-stone-800 px-3 py-2.5 text-sm text-white placeholder-stone-600 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition"
                     />
                   </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium text-stone-400">
+                      Source Hive (Optional)
+                    </label>
+                    <select
+                      value={form.hive_id ?? ""}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          hive_id: e.target.value ? e.target.value : undefined,
+                        }))
+                      }
+                      className="w-full rounded-lg border border-stone-700 bg-stone-800 px-3 py-2.5 text-sm text-white focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 transition"
+                    >
+                      <option value="">None (Not linked to a smart hive)</option>
+                      {hives.map((h) => (
+                        <option key={h.hive_id} value={h.hive_id}>
+                          {h.hive_id} {h.name ? `— ${h.name}` : `(${h.device_id})`}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-stone-500">
+                      Links this honey harvest directly to its IoT monitored apiary.
+                    </p>
+                  </div>
                   <button
                     type="submit"
                     disabled={submitting}
@@ -259,18 +545,28 @@ export default function AdminPage() {
                 </p>
                 <div className="mb-4 flex justify-center">
                   <div className="rounded-xl border border-stone-700 bg-white p-3">
-                    <Image
-                      src={modal.batch.qr_code_url}
-                      alt={`QR code for ${modal.batch.batch_id}`}
-                      width={160}
-                      height={160}
-                      unoptimized
+                    <img
+                      src={`${API_BASE_URL}/batches/${modal.batch.batch_id}/qr`}
+                      alt="Batch QR code"
+                      className="h-40 w-40 object-contain"
                     />
                   </div>
                 </div>
-                <p className="mb-5 font-mono text-sm font-bold text-amber-400">
+                <p className="mb-2 font-mono text-sm font-bold text-amber-400">
                   {modal.batch.batch_id}
                 </p>
+                {modal.batch.qr_code_url && (
+                  <div className="mb-5">
+                    <a
+                      href={modal.batch.qr_code_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-400 hover:text-amber-300 underline underline-offset-2 transition-colors"
+                    >
+                      Open Verification
+                    </a>
+                  </div>
+                )}
                 <button
                   onClick={closeModal}
                   className="w-full rounded-xl bg-amber-500 py-2.5 text-sm font-semibold text-stone-950 hover:bg-amber-400 transition-colors"
