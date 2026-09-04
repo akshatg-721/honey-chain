@@ -8,7 +8,7 @@
 import type { Batch, VerifyResponse, CreateBatchInput, AddCheckpointInput } from "./types";
 
 // ─── TOGGLE THIS TO CONNECT TO REAL BACKEND ──────────────────────────────────
-const USE_MOCK = true;
+const USE_MOCK = false;
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 // ─────────────────────────────────────────────────────────────────────────────
 
